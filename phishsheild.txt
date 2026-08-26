@@ -1,0 +1,167 @@
+# Implementation Plan - PhishShield AI Phishing Detector
+
+PhishShield AI is a state-of-the-art, premium phishing detection suite designed to analyze potential digital threats in real-time. It combines URL intelligence, NLP threat detection (using a pre-trained Hugging Face transformer model), and QR code extraction with an Explainable AI (XAI) engine to give users rich, actionable security explanations instead of just opaque risk scores.
+
+The application consists of a high-performance **FastAPI backend** and a visually gorgeous, interactive **React frontend** built with premium design principles (glassmorphism, vibrant gradients, rich micro-animations, and responsive layout).
+
+---
+
+## User Review Required
+
+> [!IMPORTANT]
+> **1. Choice of Transformer Model**
+> For high-quality, out-of-the-box predictions without manual training, we propose using a lightweight Hugging Face model fine-tuned for phishing and spam classification:
+> - **Primary Option:** `mrm8488/bert-tiny-finetuned-sms-spam-detection` (extremely lightweight, ~17MB, downloads instantly, runs perfectly on CPU).
+> - **Alternative Option:** `Subha5/distilbert-phishing-detector` (standard DistilBERT fine-tuned for phishing, ~260MB, highly accurate but requires more RAM and disk space).
+> - *Recommendation:* We will implement a flexible scanner that defaults to a lightweight model and falls back to a custom heuristic model if there are networking issues downloading from Hugging Face, ensuring the app is 100% reliable.
+>
+> **2. QR Scanner Fallback Mechanics**
+> Python `pyzbar` depends on system-level `zbar` libraries which can sometimes fail to load on Windows if visual C++ redists or DLLs are missing. 
+> - *Solution:* We will build a dual-engine QR decoder. It will try `pyzbar` first. If `pyzbar` is not available or throws an import/runtime error, it will automatically fall back to OpenCV's native `cv2.QRCodeDetector()`. This guarantees the QR scanner works flawlessly on all Windows setups.
+>
+> **3. Design System**
+> We will implement a premium **Dark Mode Glassmorphism Theme** with vibrant neon borders, animated risk meters, interactive tooltips, and SVG-based micro-interactions.
+
+---
+
+## Open Questions
+
+None at the moment. The plan covers all 7 stages in extensive detail, with safety fallbacks and high-performance design.
+
+---
+
+## Proposed Changes
+
+We will place all backend and frontend assets directly under the workspace directory (`c:\Users\rrith\Desktop\phishsheildAI`) in separate `backend/` and `frontend/` folders.
+
+```
+phishsheildAI/
+├── backend/
+│   ├── app.py
+│   ├── requirements.txt
+│   ├── scanners/
+│   │   ├── __init__.py
+│   │   ├── url_scanner.py
+│   │   ├── nlp_scanner.py
+│   │   └── qr_scanner.py
+│   ├── explainability/
+│   │   ├── __init__.py
+│   │   └── explainer.py
+│   └── utils/
+│       ├── __init__.py
+│       └── helpers.py
+└── frontend/
+    ├── package.json
+    ├── vite.config.js
+    ├── index.html
+    └── src/
+        ├── main.jsx
+        ├── index.css
+        ├── App.jsx
+        └── components/
+            ├── Dashboard.jsx
+            ├── TextScanner.jsx
+            ├── QRScanner.jsx
+            └── Navbar.jsx
+```
+
+---
+
+### Backend Component
+
+The backend will be written in Python using FastAPI. It will expose REST endpoints for text analysis, URL analysis, and QR code extraction.
+
+#### [NEW] [requirements.txt](file:///c:/Users/rrith/Desktop/phishsheildAI/backend/requirements.txt)
+- Defines the required dependencies: `fastapi`, `uvicorn`, `transformers`, `torch`, `scikit-learn`, `pandas`, `numpy`, `opencv-python-headless` (to avoid GUI dependency issues), `pyzbar`, `python-multipart`, `tldextract`, `requests`.
+
+#### [NEW] [url_scanner.py](file:///c:/Users/rrith/Desktop/phishsheildAI/backend/scanners/url_scanner.py)
+- Domain extraction using `tldextract`.
+- Risk indicators:
+  - Suspicious TLDs: `.xyz`, `.top`, `.click`, `.club`, `.info`, `.gq`, `.cf`, `.fit`, `.vip`, `.ru`, `.cc`, etc.
+  - IP-based hosts (e.g., `192.168.1.1` or hex-encoded hosts).
+  - Overly long URLs (length > 75).
+  - Keyword matching in subdomain/path: `login`, `verify`, `secure`, `bank`, `update`, `signin`, `account`, `paytm`, `paypal`, `support`.
+  - Brand impersonation heuristics (e.g., typosquatting check for brands like `paytm`, `paypal`, `google`, `netflix`, `amazon`).
+- Outputs an individual URL risk score (0-100) and specific risk findings.
+
+#### [NEW] [nlp_scanner.py](file:///c:/Users/rrith/Desktop/phishsheildAI/backend/scanners/nlp_scanner.py)
+- Integrates Hugging Face `transformers` library.
+- Implements a thread-safe pipeline for text classification.
+- Automatically handles downloading and caching the model.
+- Uses a fallback heuristic classifier (TF-IDF + Cosine Similarity or Keyword density) if the offline mode is triggered or if PyTorch/Transformers has loading issues.
+
+#### [NEW] [qr_scanner.py](file:///c:/Users/rrith/Desktop/phishsheildAI/backend/scanners/qr_scanner.py)
+- Receives uploaded image binary data.
+- Decodes image using OpenCV (`cv2.imdecode`).
+- Decodes QR code:
+  - Try decoding with `pyzbar`.
+  - Fall back to native `cv2.QRCodeDetector()` if `pyzbar` fails or isn't installed.
+- Extracts URL/Text and feeds it into the URL and NLP scanners for complete, seamless integration.
+
+#### [NEW] [explainer.py](file:///c:/Users/rrith/Desktop/phishsheildAI/backend/explainability/explainer.py)
+- **Explainable AI (XAI)** core.
+- Analyzes text and URL inputs for exact triggers:
+  - *Urgency words:* `urgent`, `immediately`, `suspended`, `action required`, `limited time`, `hurry`.
+  - *Financial & Reward triggers:* `won`, `lottery`, `cash prize`, `refund`, `verify bank`, `claim reward`.
+  - *Credential requests:* `password`, `login here`, `update details`, `reset password`.
+  - *OTP scams:* `share otp`, `one time password`, `don't share`, `code`.
+  - *Technical anomalies:* suspicious domain structure, IP hostnames, domain-to-brand mismatches.
+- Combines the raw model probability with rule findings to output:
+  - Comprehensive risk level (`Safe`, `Low Risk`, `Medium Risk`, `High Risk`).
+  - Consolidated threat score (Weighted: 40% NLP, 40% URL Heuristics, 20% Keyword heuristics).
+  - Bullet-point text explanations of exactly why the classification was made.
+
+#### [NEW] [app.py](file:///c:/Users/rrith/Desktop/phishsheildAI/backend/app.py)
+- FastAPI entrypoint setting up CORS, static file assets, and standard exception handlers.
+- Endpoints:
+  - `POST /analyze-text`: Accepts `text` and/or `url`, returns comprehensive risk assessment.
+  - `POST /scan-qr`: Accepts image file, returns decoded contents + risk assessment.
+  - `GET /health`: Health-check confirming model load status.
+
+---
+
+### Frontend Component
+
+The frontend will be built as a high-fidelity Single Page Application (SPA) using React, Vite, and custom CSS for standard-setting styling.
+
+#### [NEW] [package.json](file:///c:/Users/rrith/Desktop/phishsheildAI/frontend/package.json)
+- React, Vite, Lucide React (for premium modern icons), and other necessary UI libraries.
+
+#### [NEW] [index.css](file:///c:/Users/rrith/Desktop/phishsheildAI/frontend/src/index.css)
+- Imports beautiful modern typography (e.g., `Outfit` or `Inter` from Google Fonts).
+- Defines a comprehensive design system with variables for glassmorphism gradients, vibrant neon accents, blur backdrops, and interactive animations.
+
+#### [NEW] [Dashboard.jsx](file:///c:/Users/rrith/Desktop/phishsheildAI/frontend/src/components/Dashboard.jsx)
+- The main application panel coordinating features:
+  - **Hero Header**: Sleek glowing banner with dynamic threat stats.
+  - **Quick Action cards**: Navigating to Text & URL Scanner or QR Code Scanner.
+  - **Global Threat Alert board**: Visualizing recent scans.
+
+#### [NEW] [TextScanner.jsx](file:///c:/Users/rrith/Desktop/phishsheildAI/frontend/src/components/TextScanner.jsx)
+- Two inputs: Email/SMS content textarea and an optional URL field.
+- Glowing "Analyze Threat" button with dynamic loading state.
+- **Premium Results Pane**:
+  - Circular animated risk speedometer (grows from 0 to actual value, changing color from Emerald Green to Amber Yellow to Warning Red).
+  - Confidence metric.
+  - Explanations list with glowing threat tag badges (e.g., "[High Risk] Urgency detected").
+  - Clean comparison of NLP prediction vs. URL structure vs. Key rules.
+
+#### [NEW] [QRScanner.jsx](file:///c:/Users/rrith/Desktop/phishsheildAI/frontend/src/components/QRScanner.jsx)
+- Dynamic drag-and-drop file upload with a preview of the uploaded QR image.
+- Instantly decodes the QR image, displaying the extracted URL/Text.
+- Cascades the result into the security scanners, showing the complete safety report for the decoded destination.
+
+---
+
+## Verification Plan
+
+### Automated & Manual Verification
+1. **Dependency Validation**: Run pip install inside a virtual environment and make sure all modules load.
+2. **Backend Tests**:
+   - Send mock HTTP payloads using PowerShell or a python test script to `POST /analyze-text` and `POST /scan-qr`.
+   - Verify proper fallback to OpenCV's native QRCode detector when zbar libraries are not present.
+3. **Frontend Integration**:
+   - Run the React development server.
+   - Verify the UI adapts beautifully to different screens.
+   - Test scanning a sample text message (e.g., *"Urgent: Your account is suspended, log in to paytm-security-login.xyz immediately to verify your password."*) and confirm that the XAI returns correct explanations for Urgency, Suspicious Domain, and Credential Requests.
+   - Upload a test QR image (which contains a URL) and verify that it decodes and performs the scan properly.
